@@ -13,6 +13,7 @@ export default function Home() {
     }
   })
   const settings = useMemo(() => JSON.parse(localStorage.getItem('settings') || '{}'), [])
+  const [syncLoading, setSyncLoading] = useState(false)
 
   function normalizeOrders(raw) {
     if (!Array.isArray(raw)) return items
@@ -49,6 +50,7 @@ export default function Home() {
     if (!settings.clientId || !settings.apiKey) {
       return
     }
+    setSyncLoading(true)
     try {
       const res = await fetch(`/api/orders`, {
         method: 'POST',
@@ -71,6 +73,8 @@ export default function Home() {
       }
     } catch (e) {
       console.error(e)
+    } finally {
+      setSyncLoading(false)
     }
   }
 
@@ -89,8 +93,13 @@ export default function Home() {
 
   return (
     <div className="flex flex-col gap-4">
+      {syncLoading && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+          <div className="bg-card text-card-foreground border border-border rounded-md px-6 py-4">同步中...</div>
+        </div>
+      )}
       <div className="flex items-center justify-end">
-        <Button onClick={onSync}>同步</Button>
+        <Button onClick={onSync} disabled={syncLoading}>同步</Button>
       </div>
       <div className="rounded-md border border-border overflow-hidden">
         <Table>

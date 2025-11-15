@@ -1,12 +1,13 @@
 // /Users/chenfeng/Documents/set_ozon/src/pages/Edit.jsx
 import { useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '../components/ui/table'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 
 export default function Edit() {
   const { orderId } = useParams()
+  const navigate = useNavigate()
   const order = useMemo(() => {
     try {
       const arr = JSON.parse(localStorage.getItem('orders') || '[]')
@@ -23,6 +24,7 @@ export default function Edit() {
   const [boxConfig, setBoxConfig] = useState({})
   const [boxAlloc, setBoxAlloc] = useState({})
   const [palletRows, setPalletRows] = useState([])
+  const [execLoading, setExecLoading] = useState(false)
 
   function single(offer) {
     const v = Number(boxConfig[offer]?.single || 1)
@@ -76,15 +78,123 @@ export default function Edit() {
 
   function onEditAssemble(supply) {
     setCurrentSupply(supply)
+    let saved = {}
+    try {
+      const orders = JSON.parse(localStorage.getItem('orders')||'[]')
+      const oi = orders.findIndex(o=>String(o.order_id)===String(orderId))
+      if (oi>=0) {
+        const si = (orders[oi].supplies||[]).findIndex(s=>String(s.supply_id)===String(supply.supply_id))
+        if (si>=0) saved = orders[oi].supplies[si].assemble || {}
+      }
+    } catch {}
+    setBoxConfig(saved.boxConfig || {})
+    setBoxAlloc(saved.boxAlloc || {})
+    setPalletRows(Array.isArray(saved.palletRows) ? saved.palletRows : [])
     setAssembleOpen(true)
   }
 
   function onExecute(supply) {
-    alert(`执行: ${supply.supply_id}`)
+    try {
+      let settings = {}
+      try { settings = JSON.parse(localStorage.getItem('settings')||'{}') } catch { settings = {} }
+      const client_id = settings.clientId || ''
+      const api_key = settings.apiKey || ''
+      if (!client_id || !api_key) { alert('缺少client_id或api_key'); return }
+      const idx = supplies.findIndex(s=>String(s.supply_id)===String(supply.supply_id))
+      const supplyIndex = idx>=0 ? (idx+1) : 1
+
+      let saved = {}
+      try {
+        const orders = JSON.parse(localStorage.getItem('orders')||'[]')
+        const oi = orders.findIndex(o=>String(o.order_id)===String(orderId))
+        if (oi>=0) {
+          const si = (orders[oi].supplies||[]).findIndex(s=>String(s.supply_id)===String(supply.supply_id))
+          if (si>=0) saved = orders[oi].supplies[si].assemble || {}
+        }
+      } catch {}
+
+      const usedBoxConfig = Object.keys(saved.boxConfig||{}).length ? saved.boxConfig : boxConfig
+      const usedBoxAlloc = Object.keys(saved.boxAlloc||{}).length ? saved.boxAlloc : boxAlloc
+      const usedPalletRows = Array.isArray(saved.palletRows) && saved.palletRows.length ? saved.palletRows : palletRows
+      const items = Array.isArray(supply.items) ? supply.items : []
+
+      const productQtyMap = items.reduce((m,it)=>{ m[it.offer_id] = Number(it.quantity||0); return m },{})
+      function resolveSingle(offer){
+        const s = Number(usedBoxConfig[offer]?.single||0)
+        if (s>0) return s
+        const boxCount = Math.max(0, Number(usedBoxAlloc[offer]||0))
+        if (boxCount>0) {
+          const total = Number(productQtyMap[offer]||0)
+          const per = Math.floor(total/boxCount)
+          return per>0 ? per : 1
+        }
+        const sumBoxes = usedPalletRows.filter(r=>r.offer_id===offer).reduce((a,b)=>a+Math.max(0, Number(b.boxes||0)),0)
+        if (sumBoxes>0) {
+          const total = Number(productQtyMap[offer]||0)
+          const per = Math.floor(total/sumBoxes)
+          return per>0 ? per : 1
+        }
+        return 1
+      }
+
+      const missingBarcode = items.some(it => {
+        const b = Math.max(0, Number(usedBoxAlloc[it.offer_id]||0))
+        const p = usedPalletRows.some(r=> r.offer_id===it.offer_id && Number(r.boxes||0)>0)
+        return (b>0 || p) && !usedBoxConfig[it.offer_id]?.barcode
+      })
+      if (missingBarcode) { alert('请填写所有已分配项的箱条码'); return }
+
+      const pack = []
+      items.forEach(it => {
+        const count = Math.max(0, Number(usedBoxAlloc[it.offer_id]||0))
+        const barcode = usedBoxConfig[it.offer_id]?.barcode || ''
+        const s = resolveSingle(it.offer_id)
+        for (let i=0; i<count; i++) {
+          pack.push({
+            key: `BOX_${supplyIndex}-${barcode}_${i}`,
+            value: { items: [{ offer_id: it.offer_id, quant: 1, quantity: s }], type: 'BOX' }
+          })
+        }
+      })
+      usedPalletRows.forEach((r, idx2) => {
+        const boxes = Math.max(0, Number(r.boxes||0))
+        if (boxes>0) {
+          const barcode = usedBoxConfig[r.offer_id]?.barcode || ''
+          const s = resolveSingle(r.offer_id)
+          pack.push({
+            key: `PALLET_${supplyIndex}-${barcode}_${idx2}`,
+            value: { items: [{ offer_id: r.offer_id, quant: 1, quantity: boxes*s }], type: 'PALLET' }
+          })
+        }
+      })
+      const body = { client_id, api_key, cargoes_pack: pack, supply_id: String(supply.supply_id) }
+      setExecLoading(true)
+      fetch('/api/create-cargoes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then(async res => {
+          const text = await res.text()
+          if (!res.ok) throw new Error(text||`HTTP ${res.status}`)
+          alert('已发送')
+        })
+        .catch(err => {
+          alert(`发送失败: ${String(err.message||err)}`)
+        })
+        .finally(() => setExecLoading(false))
+    } catch (e) {
+      alert('数据准备失败')
+    }
   }
 
   return (
     <div className="flex flex-col gap-4">
+      {execLoading && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+          <div className="bg-card text-card-foreground border border-border rounded-md px-6 py-4">执行中...</div>
+        </div>
+      )}
+      <div className="flex items-center justify-between">
+        <div className="font-semibold">编辑订单 - {orderId}</div>
+        <Button variant="outline" size="sm" onClick={() => navigate('/')}>返回</Button>
+      </div>
       {assembleOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="w-full max-w-4xl bg-card text-card-foreground rounded-lg border border-border p-4 space-y-4">
