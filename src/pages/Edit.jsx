@@ -321,15 +321,17 @@ export default function Edit() {
         <Table className="table-fixed">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-1/2">供货ID</TableHead>
-              <TableHead className="w-1/4 text-center">编辑装配</TableHead>
-              <TableHead className="w-1/4 text-center">执行</TableHead>
+              <TableHead className="w-2/5">供货ID</TableHead>
+              <TableHead className="w-1/5">仓库</TableHead>
+              <TableHead className="w-1/5 text-center">编辑装配</TableHead>
+              <TableHead className="w-1/5 text-center">执行</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {supplies.map((s) => (
               <TableRow key={String(s.supply_id)}>
                 <TableCell className="truncate"><span className="block truncate">{s.supply_id}</span></TableCell>
+                <TableCell className="truncate"><span className="block truncate">{s.warehouse_name||''}</span></TableCell>
                 <TableCell className="text-center">
                   <Button className="w-full" variant="outline" size="sm" onClick={() => onEditAssemble(s)}>编辑装配</Button>
                 </TableCell>
