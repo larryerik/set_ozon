@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '../components/ui/button'
+import { Loader2 } from 'lucide-react'
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '../components/ui/table'
 
 export default function Home() {
@@ -23,17 +24,17 @@ export default function Home() {
       const state = o.state ?? ''
       const supplies = Array.isArray(o.supplies)
         ? o.supplies.map((s) => ({
-            ...s,
-            items: Array.isArray(s.items)
-              ? s.items.map((it) => ({
-                  ...it,
-                  icon_path:
-                    typeof it.icon_path === 'string'
-                      ? it.icon_path.replace(/`/g, '').trim()
-                      : it.icon_path,
-                }))
-              : [],
-          }))
+          ...s,
+          items: Array.isArray(s.items)
+            ? s.items.map((it) => ({
+              ...it,
+              icon_path:
+                typeof it.icon_path === 'string'
+                  ? it.icon_path.replace(/`/g, '').trim()
+                  : it.icon_path,
+            }))
+            : [],
+        }))
         : []
       return { order_id, order_number, state, supplies }
     })
@@ -62,10 +63,10 @@ export default function Home() {
         const next = Array.isArray(data)
           ? normalizeOrders(data)
           : Array.isArray(data?.orders)
-          ? normalizeOrders(data.orders)
-          : Array.isArray(data?.items)
-          ? normalizeOrders(data.items)
-          : items
+            ? normalizeOrders(data.orders)
+            : Array.isArray(data?.items)
+              ? normalizeOrders(data.items)
+              : items
         setItems(next)
         localStorage.setItem('orders', JSON.stringify(next))
       } else {
@@ -94,8 +95,11 @@ export default function Home() {
   return (
     <div className="flex flex-col gap-4">
       {syncLoading && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
-          <div className="bg-card text-card-foreground border border-border rounded-md px-6 py-4">同步中...</div>
+        <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center">
+          <div className="flex flex-col items-center gap-4">
+            <Loader2 className="h-10 w-10 animate-spin text-primary" />
+            <p className="text-lg font-medium text-muted-foreground">正在同步订单数据...</p>
+          </div>
         </div>
       )}
       <div className="flex items-center justify-end">
