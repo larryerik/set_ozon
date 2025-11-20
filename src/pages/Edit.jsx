@@ -136,83 +136,148 @@ export default function Edit() {
     setAssembleOpen(true)
   }
 
-  function onExecute(supply) {
+  function generatePack(supply, saved, supplyIndex) {
+    const usedBoxConfig = Object.keys(saved.boxConfig || {}).length ? saved.boxConfig : {}
+    const usedBoxAlloc = Object.keys(saved.boxAlloc || {}).length ? saved.boxAlloc : {}
+    const usedPalletRows = Array.isArray(saved.palletRows) && saved.palletRows.length ? saved.palletRows : []
+    const items = Array.isArray(supply.items) ? supply.items : []
+
+    const productQtyMap = items.reduce((m, it) => { m[it.offer_id] = Number(it.quantity || 0); return m }, {})
+
+    function resolveSingle(offer) {
+      const s = Number(usedBoxConfig[offer]?.single || 0)
+      if (s > 0) return s
+      const boxCount = Math.max(0, Number(usedBoxAlloc[offer] || 0))
+      if (boxCount > 0) {
+        const total = Number(productQtyMap[offer] || 0)
+        const per = Math.floor(total / boxCount)
+        return per > 0 ? per : 1
+      }
+      const sumBoxes = usedPalletRows.filter(r => r.offer_id === offer).reduce((a, b) => a + Math.max(0, Number(b.boxes || 0)), 0)
+      if (sumBoxes > 0) {
+        const total = Number(productQtyMap[offer] || 0)
+        const per = Math.floor(total / sumBoxes)
+        return per > 0 ? per : 1
+      }
+      return 1
+    }
+
+    const missingBarcode = items.some(it => {
+      const b = Math.max(0, Number(usedBoxAlloc[it.offer_id] || 0))
+      const p = usedPalletRows.some(r => r.offer_id === it.offer_id && Number(r.boxes || 0) > 0)
+      return (b > 0 || p) && !usedBoxConfig[it.offer_id]?.barcode
+    })
+    if (missingBarcode) {
+      throw new Error(`供货 ${supply.supply_id}: 请填写所有已分配项的箱条码`)
+    }
+
+    const pack = []
+    let boxCounter = 0
+
+    items.forEach(it => {
+      const count = Math.max(0, Number(usedBoxAlloc[it.offer_id] || 0))
+      const barcode = usedBoxConfig[it.offer_id]?.barcode || ''
+      const s = resolveSingle(it.offer_id)
+      for (let i = 0; i < count; i++) {
+        pack.push({
+          key: `BOX_${supplyIndex}-${barcode}_${boxCounter}`,
+          value: { items: [{ offer_id: it.offer_id, quant: 1, quantity: s }], type: 'BOX' }
+        })
+        boxCounter++
+      }
+    })
+    usedPalletRows.forEach((r, idx2) => {
+      const boxes = Math.max(0, Number(r.boxes || 0))
+      if (boxes > 0) {
+        const barcode = usedBoxConfig[r.offer_id]?.barcode || ''
+        const s = resolveSingle(r.offer_id)
+        pack.push({
+          key: `PALLET_${supplyIndex}-${boxes}${barcode}_${idx2}`,
+          value: { items: [{ offer_id: r.offer_id, quant: 1, quantity: boxes * s }], type: 'PALLET' }
+        })
+      }
+    })
+    return pack
+  }
+
+  function onExecuteAll() {
     try {
       let settings = {}
       try { settings = JSON.parse(localStorage.getItem('settings') || '{}') } catch { settings = {} }
       const client_id = settings.clientId || ''
       const api_key = settings.apiKey || ''
       if (!client_id || !api_key) { alert('缺少client_id或api_key'); return }
-      const idx = supplies.findIndex(s => String(s.supply_id) === String(supply.supply_id))
-      const supplyIndex = idx >= 0 ? (idx + 1) : 1
 
-      let saved = {}
-      try {
-        const orders = JSON.parse(localStorage.getItem('orders') || '[]')
-        const oi = orders.findIndex(o => String(o.order_id) === String(orderId))
-        if (oi >= 0) {
-          const si = (orders[oi].supplies || []).findIndex(s => String(s.supply_id) === String(supply.supply_id))
-          if (si >= 0) saved = orders[oi].supplies[si].assemble || {}
-        }
-      } catch { }
+      const orders = JSON.parse(localStorage.getItem('orders') || '[]')
+      const currentOrder = orders.find(o => String(o.order_id) === String(orderId))
+      if (!currentOrder) { alert('订单未找到'); return }
 
-      const usedBoxConfig = Object.keys(saved.boxConfig || {}).length ? saved.boxConfig : boxConfig
-      const usedBoxAlloc = Object.keys(saved.boxAlloc || {}).length ? saved.boxAlloc : boxAlloc
-      const usedPalletRows = Array.isArray(saved.palletRows) && saved.palletRows.length ? saved.palletRows : palletRows
-      const items = Array.isArray(supply.items) ? supply.items : []
+      const supplyList = Array.isArray(currentOrder.supplies) ? currentOrder.supplies : []
 
-      const productQtyMap = items.reduce((m, it) => { m[it.offer_id] = Number(it.quantity || 0); return m }, {})
-      function resolveSingle(offer) {
-        const s = Number(usedBoxConfig[offer]?.single || 0)
-        if (s > 0) return s
-        const boxCount = Math.max(0, Number(usedBoxAlloc[offer] || 0))
-        if (boxCount > 0) {
-          const total = Number(productQtyMap[offer] || 0)
-          const per = Math.floor(total / boxCount)
-          return per > 0 ? per : 1
-        }
-        const sumBoxes = usedPalletRows.filter(r => r.offer_id === offer).reduce((a, b) => a + Math.max(0, Number(b.boxes || 0)), 0)
-        if (sumBoxes > 0) {
-          const total = Number(productQtyMap[offer] || 0)
-          const per = Math.floor(total / sumBoxes)
-          return per > 0 ? per : 1
-        }
-        return 1
+      // Check for incomplete items
+      const warnings = []
+      supplyList.forEach(s => {
+        const saved = s.assemble || {}
+        const items = s.items || []
+        const usedBoxConfig = saved.boxConfig || {}
+        const usedBoxAlloc = saved.boxAlloc || {}
+        const usedPalletRows = saved.palletRows || []
+
+        items.forEach(it => {
+          const total = Number(it.quantity || 0)
+          const single = Number(usedBoxConfig[it.offer_id]?.single || 1)
+          const boxCount = Number(usedBoxAlloc[it.offer_id] || 0)
+          const palletBoxes = usedPalletRows.filter(r => r.offer_id === it.offer_id).reduce((a, b) => a + (Number(b.boxes) || 0), 0)
+          const used = (boxCount + palletBoxes) * single
+
+          if (used < total) {
+            warnings.push(`供货 ${s.supply_id} - 货号 ${it.offer_id}: 已分配 ${used} / 总数 ${total}`)
+          }
+        })
+      })
+
+      if (warnings.length > 0) {
+        const msg = "以下产品未完全装配：\n" + warnings.join("\n") + "\n\n是否继续执行？"
+        if (!window.confirm(msg)) return
       }
 
-      const missingBarcode = items.some(it => {
-        const b = Math.max(0, Number(usedBoxAlloc[it.offer_id] || 0))
-        const p = usedPalletRows.some(r => r.offer_id === it.offer_id && Number(r.boxes || 0) > 0)
-        return (b > 0 || p) && !usedBoxConfig[it.offer_id]?.barcode
-      })
-      if (missingBarcode) { alert('请填写所有已分配项的箱条码'); return }
+      const payload = []
 
-      const pack = []
-      items.forEach(it => {
-        const count = Math.max(0, Number(usedBoxAlloc[it.offer_id] || 0))
-        const barcode = usedBoxConfig[it.offer_id]?.barcode || ''
-        const s = resolveSingle(it.offer_id)
-        for (let i = 0; i < count; i++) {
-          pack.push({
-            key: `BOX_${supplyIndex}-${barcode}_${i}`,
-            value: { items: [{ offer_id: it.offer_id, quant: 1, quantity: s }], type: 'BOX' }
-          })
+      for (let i = 0; i < supplyList.length; i++) {
+        const s = supplyList[i]
+        const saved = s.assemble || {}
+        const hasAlloc = Object.values(saved.boxAlloc || {}).some(v => Number(v) > 0) || (saved.palletRows || []).some(r => Number(r.boxes) > 0)
+
+        if (hasAlloc) {
+          try {
+            const currentSupplyIndex = i + 1
+            const pack = generatePack(s, saved, currentSupplyIndex)
+            payload.push({
+              cargoes_pack: pack,
+              supply_id: String(s.supply_id)
+            })
+          } catch (err) {
+            alert(err.message)
+            return
+          }
         }
-      })
-      usedPalletRows.forEach((r, idx2) => {
-        const boxes = Math.max(0, Number(r.boxes || 0))
-        if (boxes > 0) {
-          const barcode = usedBoxConfig[r.offer_id]?.barcode || ''
-          const s = resolveSingle(r.offer_id)
-          pack.push({
-            key: `PALLET_${supplyIndex}-${barcode}_${idx2}`,
-            value: { items: [{ offer_id: r.offer_id, quant: 1, quantity: boxes * s }], type: 'PALLET' }
-          })
-        }
-      })
-      const body = { client_id, api_key, cargoes_pack: pack, supply_id: String(supply.supply_id) }
+      }
+
+      if (payload.length === 0) {
+        alert('没有可执行的装配数据')
+        return
+      }
+
       setExecLoading(true)
-      fetch('/api/create-cargoes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const sendData = {
+        client_id,
+        api_key,
+        order_number: currentOrder.order_number,
+        payload
+
+      }
+      console.log("sendData", sendData)
+      fetch('/api/create-cargoes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sendData) })
         .then(async res => {
           const text = await res.text()
           if (!res.ok) throw new Error(text || `HTTP ${res.status}`)
@@ -222,8 +287,10 @@ export default function Edit() {
           alert(`发送失败: ${String(err.message || err)}`)
         })
         .finally(() => setExecLoading(false))
+
     } catch (e) {
-      alert('数据准备失败')
+      console.error(e)
+      alert('执行失败')
     }
   }
 
@@ -241,6 +308,7 @@ export default function Edit() {
         </Button>
         <div className="h-4 w-px bg-border" />
         <div className="font-semibold text-lg">编辑订单 <span className="font-normal text-muted-foreground ml-2">{order.order_number || orderId}</span></div>
+        <Button className="ml-auto" onClick={onExecuteAll}>执行</Button>
       </div>
       {assembleOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -369,9 +437,8 @@ export default function Edit() {
           <TableHeader>
             <TableRow>
               <TableHead className="w-2/5">供货ID</TableHead>
-              <TableHead className="w-1/5">仓库</TableHead>
+              <TableHead className="w-2/5">仓库</TableHead>
               <TableHead className="w-1/5 text-center">编辑装配</TableHead>
-              <TableHead className="w-1/5 text-center">执行</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -381,9 +448,6 @@ export default function Edit() {
                 <TableCell className="truncate"><span className="block truncate">{s.warehouse_name || ''}</span></TableCell>
                 <TableCell className="text-center">
                   <Button className="w-full" variant="outline" size="sm" onClick={() => onEditAssemble(s)}>编辑装配</Button>
-                </TableCell>
-                <TableCell className="text-center">
-                  <Button className="w-full" size="sm" onClick={() => onExecute(s)}>执行</Button>
                 </TableCell>
               </TableRow>
             ))}
