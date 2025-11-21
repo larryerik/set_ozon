@@ -279,6 +279,7 @@ export default function Edit() {
             const pack = generatePack(s, saved, currentSupplyIndex)
             payload.push({
               cargoes_pack: pack,
+              warehouse_name: s.warehouse_name,
               supply_id: String(s.supply_id)
             })
           } catch (err) {
