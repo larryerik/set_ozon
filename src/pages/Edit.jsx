@@ -4,6 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '../components/ui/table'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
+import { DatePicker } from '../components/ui/date-picker'
 import { ChevronLeft } from 'lucide-react'
 
 export default function Edit() {
@@ -35,6 +36,9 @@ export default function Edit() {
   }
   function setBarcode(offer, val) {
     setBoxConfig(prev => ({ ...prev, [offer]: { ...(prev[offer] || {}), barcode: val } }))
+  }
+  function setExpiresAt(offer, val) {
+    setBoxConfig(prev => ({ ...prev, [offer]: { ...(prev[offer] || {}), expires_at: val } }))
   }
   function setBoxCount(offer, val) {
     const n = Math.max(0, Number(val) || 0)
@@ -147,6 +151,7 @@ export default function Edit() {
             } else {
               if (!initialBoxConfig[oid].single && g.single) initialBoxConfig[oid].single = g.single
               if (!initialBoxConfig[oid].barcode && g.barcode) initialBoxConfig[oid].barcode = g.barcode
+              if (!initialBoxConfig[oid].expires_at && g.expires_at) initialBoxConfig[oid].expires_at = g.expires_at
             }
           }
         })
@@ -202,11 +207,14 @@ export default function Edit() {
     items.forEach(it => {
       const count = Math.max(0, Number(usedBoxAlloc[it.offer_id] || 0))
       const barcode = usedBoxConfig[it.offer_id]?.barcode || ''
+      const expiresAt = usedBoxConfig[it.offer_id]?.expires_at ? new Date(usedBoxConfig[it.offer_id].expires_at).toISOString() : undefined
       const s = resolveSingle(it.offer_id)
       for (let i = 0; i < count; i++) {
+        const itemObj = { offer_id: it.offer_id, quant: 1, quantity: s }
+        if (expiresAt) itemObj.expires_at = expiresAt
         pack.push({
           key: `BOX_${supplyIndex}-${barcode}_${boxCounter}`,
-          value: { items: [{ offer_id: it.offer_id, quant: 1, quantity: s }], type: 'BOX' }
+          value: { items: [itemObj], type: 'BOX' }
         })
         boxCounter++
       }
@@ -215,10 +223,13 @@ export default function Edit() {
       const boxes = Math.max(0, Number(r.boxes || 0))
       if (boxes > 0) {
         const barcode = usedBoxConfig[r.offer_id]?.barcode || ''
+        const expiresAt = usedBoxConfig[r.offer_id]?.expires_at ? new Date(usedBoxConfig[r.offer_id].expires_at).toISOString() : undefined
         const s = resolveSingle(r.offer_id)
+        const itemObj = { offer_id: r.offer_id, quant: 1, quantity: boxes * s }
+        if (expiresAt) itemObj.expires_at = expiresAt
         pack.push({
           key: `PALLET_${supplyIndex}-${boxes}${barcode}_${idx2}`,
-          value: { items: [{ offer_id: r.offer_id, quant: 1, quantity: boxes * s }], type: 'PALLET' }
+          value: { items: [itemObj], type: 'PALLET' }
         })
       }
     })
@@ -371,9 +382,10 @@ export default function Edit() {
                     <TableRow>
                       <TableHead className="w-2/12">货号</TableHead>
                       <TableHead className="w-2/12">数量</TableHead>
-                      <TableHead className="w-3/12">单箱数量</TableHead>
-                      <TableHead className="w-3/12">箱数</TableHead>
+                      <TableHead className="w-2/12">单箱数量</TableHead>
+                      <TableHead className="w-2/12">箱数</TableHead>
                       <TableHead className="w-2/12">箱条码</TableHead>
+                      <TableHead className="w-2/12">保质期</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -388,6 +400,9 @@ export default function Edit() {
                         <TableCell>
                           <Input className={offerUsedQty(it.offer_id) > 0 && !boxConfig[it.offer_id]?.barcode ? 'border-destructive' : ''} value={boxConfig[it.offer_id]?.barcode || ''} onChange={(e) => setBarcode(it.offer_id, e.target.value)} />
                           {offerUsedQty(it.offer_id) > 0 && !boxConfig[it.offer_id]?.barcode ? <div className="text-destructive text-xs mt-1">必填</div> : null}
+                        </TableCell>
+                        <TableCell>
+                          <DatePicker value={boxConfig[it.offer_id]?.expires_at || ''} onChange={(e) => setExpiresAt(it.offer_id, e.target.value)} />
                         </TableCell>
                       </TableRow>
                     ))}
