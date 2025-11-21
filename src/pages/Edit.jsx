@@ -9,16 +9,15 @@ import { ChevronLeft } from 'lucide-react'
 export default function Edit() {
   const { orderId } = useParams()
   const navigate = useNavigate()
-  const order = useMemo(() => {
+  const [order, setOrder] = useState(() => {
     try {
       const arr = JSON.parse(localStorage.getItem('orders') || '[]')
       return arr.find(o => String(o.order_id) === String(orderId)) || { supplies: [] }
     } catch {
       return { supplies: [] }
     }
-  }, [orderId])
-
-  const supplies = Array.isArray(order.supplies) ? order.supplies : []
+  })
+  const [supplies, setSupplies] = useState(Array.isArray(order.supplies) ? order.supplies : [])
 
   const [assembleOpen, setAssembleOpen] = useState(false)
   const [currentSupply, setCurrentSupply] = useState(null)
@@ -65,34 +64,60 @@ export default function Edit() {
     setPalletRows(prev => prev.filter((_, i) => i !== idx))
   }
   function onSaveAssemble() {
-    const orders = JSON.parse(localStorage.getItem('orders') || '[]')
-    const oi = orders.findIndex(o => String(o.order_id) === String(orderId))
-    if (oi >= 0) {
-      const si = (orders[oi].supplies || []).findIndex(s => String(s.supply_id) === String(currentSupply.supply_id))
-      if (si >= 0) {
-        orders[oi].supplies[si].assemble = { boxConfig, boxAlloc, palletRows }
-        localStorage.setItem('orders', JSON.stringify(orders))
-      }
-    }
-
-    // Save to global product configs
     try {
-      const globalConfigs = JSON.parse(localStorage.getItem('product_configs') || '{}')
-      Object.keys(boxConfig).forEach(offerId => {
-        const conf = boxConfig[offerId]
-        if (conf) {
-          globalConfigs[offerId] = {
-            ...(globalConfigs[offerId] || {}),
-            ...conf
-          }
-        }
-      })
-      localStorage.setItem('product_configs', JSON.stringify(globalConfigs))
-    } catch (e) {
-      console.error('Failed to save global product configs', e)
-    }
+      // Validation
+      if (totalBoxes() > 30) {
+        alert('总箱数不可超过30')
+        return
+      }
+      const items = currentSupply?.items || []
+      const overAllocated = items.find(it => offerUsedQty(it.offer_id) > productQuantity(it.offer_id))
+      if (overAllocated) {
+        alert(`货号 ${overAllocated.offer_id} 分配数量超过总数`)
+        return
+      }
+      const missingBarcode = items.find(it => offerUsedQty(it.offer_id) > 0 && !boxConfig[it.offer_id]?.barcode)
+      if (missingBarcode) {
+        alert(`货号 ${missingBarcode.offer_id} 已分配但未填写箱条码`)
+        return
+      }
 
-    setAssembleOpen(false)
+      const orders = JSON.parse(localStorage.getItem('orders') || '[]')
+      const oi = orders.findIndex(o => String(o.order_id) === String(orderId))
+      if (oi >= 0) {
+        const si = (orders[oi].supplies || []).findIndex(s => String(s.supply_id) === String(currentSupply.supply_id))
+        if (si >= 0) {
+          orders[oi].supplies[si].assemble = { boxConfig, boxAlloc, palletRows }
+          localStorage.setItem('orders', JSON.stringify(orders))
+
+          // Update local state to reflect changes immediately
+          setOrder(orders[oi])
+          setSupplies(orders[oi].supplies || [])
+        }
+      }
+
+      // Save to global product configs
+      try {
+        const globalConfigs = JSON.parse(localStorage.getItem('product_configs') || '{}')
+        Object.keys(boxConfig).forEach(offerId => {
+          const conf = boxConfig[offerId]
+          if (conf) {
+            globalConfigs[offerId] = {
+              ...(globalConfigs[offerId] || {}),
+              ...conf
+            }
+          }
+        })
+        localStorage.setItem('product_configs', JSON.stringify(globalConfigs))
+      } catch (e) {
+        console.error('Failed to save global product configs', e)
+      }
+
+      setAssembleOpen(false)
+    } catch (err) {
+      console.error(err)
+      alert(`保存出错: ${err.message}`)
+    }
   }
 
   function onEditAssemble(supply) {
@@ -272,9 +297,8 @@ export default function Edit() {
       const sendData = {
         client_id,
         api_key,
-        order_number: currentOrder.order_number,
-        payload
-
+        order_number: String(currentOrder.order_number),
+        data: payload
       }
       console.log("sendData", sendData)
       fetch('/api/create-cargoes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sendData) })
@@ -292,6 +316,26 @@ export default function Edit() {
       console.error(e)
       alert('执行失败')
     }
+  }
+
+
+  function getSupplyUnallocated(supply) {
+    const saved = supply.assemble || {}
+    const items = supply.items || []
+    const usedBoxConfig = saved.boxConfig || {}
+    const usedBoxAlloc = saved.boxAlloc || {}
+    const usedPalletRows = saved.palletRows || []
+
+    let totalUnallocated = 0
+    items.forEach(it => {
+      const total = Number(it.quantity || 0)
+      const single = Number(usedBoxConfig[it.offer_id]?.single || 1)
+      const boxCount = Number(usedBoxAlloc[it.offer_id] || 0)
+      const palletBoxes = usedPalletRows.filter(r => r.offer_id === it.offer_id).reduce((a, b) => a + (Number(b.boxes) || 0), 0)
+      const used = (boxCount + palletBoxes) * single
+      totalUnallocated += (total - used)
+    })
+    return totalUnallocated
   }
 
   return (
@@ -428,7 +472,7 @@ export default function Edit() {
 
             <div className="flex items-center justify-end gap-2 p-4 border-t">
               <Button variant="outline" onClick={() => setAssembleOpen(false)}>取消</Button>
-              <Button onClick={onSaveAssemble} disabled={totalBoxes() > 30 || (currentSupply?.items || []).some(it => offerUsedQty(it.offer_id) > productQuantity(it.offer_id)) || (currentSupply?.items || []).some(it => offerUsedQty(it.offer_id) > 0 && !boxConfig[it.offer_id]?.barcode)}>保存</Button>
+              <Button onClick={onSaveAssemble}>保存</Button>
             </div>
           </div>
         </div>
@@ -438,21 +482,28 @@ export default function Edit() {
         <Table className="table-fixed">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-2/5">供货ID</TableHead>
-              <TableHead className="w-2/5">仓库</TableHead>
-              <TableHead className="w-1/5 text-center">编辑装配</TableHead>
+              <TableHead className="w-3/12">供货ID</TableHead>
+              <TableHead className="w-3/12">仓库</TableHead>
+              <TableHead className="w-3/12 text-center">未分配产品数</TableHead>
+              <TableHead className="w-3/12 text-center">编辑装配</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {supplies.map((s) => (
-              <TableRow key={String(s.supply_id)}>
-                <TableCell className="truncate"><span className="block truncate">{s.supply_id}</span></TableCell>
-                <TableCell className="truncate"><span className="block truncate">{s.warehouse_name || ''}</span></TableCell>
-                <TableCell className="text-center">
-                  <Button className="w-full" variant="outline" size="sm" onClick={() => onEditAssemble(s)}>编辑装配</Button>
-                </TableCell>
-              </TableRow>
-            ))}
+            {supplies.map((s) => {
+              const unallocated = getSupplyUnallocated(s)
+              return (
+                <TableRow key={String(s.supply_id)}>
+                  <TableCell className="truncate"><span className="block truncate">{s.supply_id}</span></TableCell>
+                  <TableCell className="truncate"><span className="block truncate">{s.warehouse_name || ''}</span></TableCell>
+                  <TableCell className={`text-center ${unallocated !== 0 ? 'text-destructive font-bold' : 'text-muted-foreground'}`}>
+                    {unallocated}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    <Button className="w-full" variant="outline" size="sm" onClick={() => onEditAssemble(s)}>编辑装配</Button>
+                  </TableCell>
+                </TableRow>
+              )
+            })}
           </TableBody>
         </Table>
       </div>
