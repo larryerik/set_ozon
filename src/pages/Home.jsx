@@ -83,7 +83,11 @@ export default function Home() {
 
   function onAction(action, idx) {
     if (action === '删除') {
-      setItems(prev => prev.filter((_, i) => i !== idx))
+      setItems(prev => {
+        const next = prev.filter((_, i) => i !== idx)
+        localStorage.setItem('orders', JSON.stringify(next))
+        return next
+      })
     } else if (action === '编辑') {
       navigate(`/edit/${items[idx].order_id}`)
     }
@@ -98,7 +102,7 @@ export default function Home() {
         <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center">
           <div className="flex flex-col items-center gap-4">
             <Loader2 className="h-10 w-10 animate-spin text-primary" />
-            <p className="text-lg font-medium text-muted-foreground">正在同步订单数据...</p>
+            <p className="text-lg font-medium text-muted-foreground">正在同步数据...</p>
           </div>
         </div>
       )}
