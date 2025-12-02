@@ -53,7 +53,7 @@ export default function Home() {
     }
     setSyncLoading(true)
     try {
-      const res = await fetch(`/api/orders`, {
+      const res = await fetch(`http://localhost:8000/orders`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ client_id: settings.clientId, api_key: settings.apiKey }),

@@ -313,7 +313,7 @@ export default function Edit() {
         data: payload
       }
       console.log("sendData", sendData)
-      fetch('/api/create-cargoes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sendData) })
+      fetch('http://localhost:8000/create-cargoes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sendData) })
         .then(async res => {
           const text = await res.text()
           if (!res.ok) throw new Error(text || `HTTP ${res.status}`)
