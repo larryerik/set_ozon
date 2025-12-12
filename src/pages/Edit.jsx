@@ -70,8 +70,17 @@ export default function Edit() {
   function onSaveAssemble() {
     try {
       // Validation
-      if (totalBoxes() > 30) {
-        alert('总箱数不可超过30')
+      const loose = totalBoxes()
+      const palletBoxes = palletRows.reduce((a, r) => a + (Number(r.boxes) || 0), 0)
+      const grandTotal = loose + palletBoxes
+
+      if (grandTotal > 200) {
+        alert('最大箱数200个')
+        return
+      }
+
+      if (palletRows.length > 0 && loose > 30) {
+        alert('当有托盘时，箱子最大30个')
         return
       }
       const items = currentSupply?.items || []
@@ -437,7 +446,7 @@ export default function Edit() {
                     })}
                   </TableBody>
                 </Table>
-                {totalBoxes() > 30 && <div className="text-destructive">总箱数不可超过30</div>}
+                {(palletRows.length > 0 ? totalBoxes() > 30 : totalBoxes() > 200) && <div className="text-destructive">{palletRows.length > 0 ? '当有托盘时，箱子最大30个' : '最大箱数200个'}</div>}
               </div>
 
               <div className="space-y-2">
@@ -500,8 +509,9 @@ export default function Edit() {
             <TableRow>
               <TableHead className="w-3/12">供货ID</TableHead>
               <TableHead className="w-3/12">仓库</TableHead>
-              <TableHead className="w-3/12 text-center">未分配产品数</TableHead>
-              <TableHead className="w-3/12 text-center">编辑装配</TableHead>
+              <TableHead className="w-2/12">状态</TableHead>
+              <TableHead className="w-2/12 text-center">未分配产品数</TableHead>
+              <TableHead className="w-2/12 text-center">编辑装配</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -511,6 +521,7 @@ export default function Edit() {
                 <TableRow key={String(s.supply_id)}>
                   <TableCell className="truncate"><span className="block truncate">{s.supply_id}</span></TableCell>
                   <TableCell className="truncate"><span className="block truncate">{s.warehouse_name || ''}</span></TableCell>
+                  <TableCell className="truncate"><span className="block truncate">{s.state || ''}</span></TableCell>
                   <TableCell className={`text-center ${unallocated !== 0 ? 'text-destructive font-bold' : 'text-muted-foreground'}`}>
                     {unallocated}
                   </TableCell>
